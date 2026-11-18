@@ -106,10 +106,12 @@ select{font:inherit;padding:10px;border-radius:10px;background:#1a1a38;color:#ff
    <button id="menuimgClear" class="alt" style="display:none;flex:0 0 auto" data-i18n="remove"></button>
   </div>
   <input id="menuimgfile" type="file" accept="image/*" style="display:none">
+  <input id="menuImgName" type="text" maxlength="30" style="display:none;width:100%" data-ph="imgname_menu">
   <div class="row">
    <label class="btn alt" for="charfile_idle" data-i18n="char_idle"></label><label class="btn alt" for="charfile_talk" data-i18n="char_talk"></label>
    <button class="alt charClear" style="display:none;flex:0 0 auto" data-i18n="remove"></button>
   </div>
+  <input id="charImgName" type="text" maxlength="30" style="display:none;width:100%" data-ph="imgname_char">
   <input id="charfile_idle" class="cf" data-slot="idle" type="file" accept="image/*" style="display:none">
   <input id="charfile_talk" class="cf" data-slot="talk" type="file" accept="image/*" style="display:none">
   <div id="songInfo" style="display:none"></div>
@@ -685,10 +687,10 @@ zh:['节奏游戏 · 飞行音符 · 触屏与手柄','📂 导入歌曲','▶ �
 const DICT={};
 for(const c in I18N_DATA){ DICT[c]={}; I18N_KEYS.forEach((k,i)=>{DICT[c][k]=I18N_DATA[c][i];}); }
 /*I18N_END*/
-const EXTRA_KEYS=['say_hi','say_nice','say_luck','say_pause','login_title','login_ph','login_btn','change_name','char_btn','padcal','padlearn','padok','padcaldir','dirlearn','dirok','samechorus','charname'];
+const EXTRA_KEYS=['say_hi','say_nice','say_luck','say_pause','login_title','login_ph','login_btn','change_name','char_btn','padcal','padlearn','padok','padcaldir','dirlearn','dirok','samechorus','charname','imgname_menu','imgname_char'];
 const EXTRA={
-en:["Hi, I'm Miku! And you?","Nice to meet you, {0}!","Good luck! … you're going to need it..","HEY! I was listening!","Choose your name","Username","Let's go","✎ Change name","🎭 Character image (transparent PNG)","🎮 Set up gamepad buttons","Press the button for: {0}","Gamepad buttons saved.","🎮 Set up the D-pad","Press on the D-pad: {0}","D-pad saved.","Identical notes in repeated sections (chorus)","Character name"],
-fr:["Salut je suis Miku ! Et toi ?","Enchantée, {0} !","Bonne chance ! … tu en auras besoin..","HEY ! J'étais en train d'écouter !","Choisis ton nom","Nom d'utilisateur","C'est parti","✎ Changer de nom","🎭 Image du personnage (PNG transparent)","🎮 Configurer les boutons de la manette","Appuyez sur le bouton pour : {0}","Boutons de la manette enregistrés.","🎮 Configurer la croix directionnelle","Appuyez sur la croix : {0}","Croix directionnelle enregistrée.","Notes identiques dans les parties répétées (refrain)","Nom du personnage"],
+en:["Hi, I'm Miku! And you?","Nice to meet you, {0}!","Good luck! … you're going to need it..","HEY! I was listening!","Choose your name","Username","Let's go","✎ Change name","🎭 Character image (transparent PNG)","🎮 Set up gamepad buttons","Press the button for: {0}","Gamepad buttons saved.","🎮 Set up the D-pad","Press on the D-pad: {0}","D-pad saved.","Identical notes in repeated sections (chorus)","Character name","Name of the menu image","Character name"],
+fr:["Salut je suis Miku ! Et toi ?","Enchantée, {0} !","Bonne chance ! … tu en auras besoin..","HEY ! J'étais en train d'écouter !","Choisis ton nom","Nom d'utilisateur","C'est parti","✎ Changer de nom","🎭 Image du personnage (PNG transparent)","🎮 Configurer les boutons de la manette","Appuyez sur le bouton pour : {0}","Boutons de la manette enregistrés.","🎮 Configurer la croix directionnelle","Appuyez sur la croix : {0}","Croix directionnelle enregistrée.","Notes identiques dans les parties répétées (refrain)","Nom du personnage","Nom de l'image du menu","Nom du personnage"],
 es:["¡Hola, soy Miku! ¿Y tú?","¡Encantada, {0}!","¡Buena suerte! … la vas a necesitar..","¡EH! ¡Estaba escuchando!","Elige tu nombre","Nombre de usuario","Vamos","✎ Cambiar nombre","🎭 Imagen del personaje (PNG transparente)"],
 de:["Hi, ich bin Miku! Und du?","Freut mich, {0}!","Viel Glück! … das wirst du brauchen..","HEY! Ich hab gerade zugehört!","Wähle deinen Namen","Benutzername","Los geht's","✎ Name ändern","🎭 Charakterbild (transparentes PNG)"],
 it:["Ciao, sono Miku! E tu?","Piacere, {0}!","Buona fortuna! … ti servirà..","EHI! Stavo ascoltando!","Scegli il tuo nome","Nome utente","Andiamo","✎ Cambia nome","🎭 Immagine del personaggio (PNG trasparente)"],
@@ -735,7 +737,7 @@ function updateNames(){
   if(bgNameText){ $('bgName').style.display='block'; $('bgName').textContent=t('vid_name',bgNameText); }
   if(lrcNameText){ $('lrcName').style.display='block'; $('lrcName').textContent=t('lyr_name',lrcNameText.name,lrcNameText.n); }
 }
-function applyI18n(){
+function applyI18n(){ try{refreshImgNames();}catch(e){}
   LANG=detectLang(); document.documentElement.lang=LANG;
   document.querySelectorAll('[data-i18n]').forEach(e=>{e.textContent=t(e.dataset.i18n);});
   document.querySelectorAll('[data-i18n-html]').forEach(e=>{e.innerHTML=t(e.dataset.i18nHtml);});
@@ -892,7 +894,7 @@ $('speed').oninput=e=>{settings.speed=+e.target.value;syncSettingsUI();saveSetti
 $('offset').oninput=e=>{settings.offset=+e.target.value;syncSettingsUI();saveSettings();};
 $('any').onchange=e=>{settings.any=e.target.checked;saveSettings();};
 $('charName').addEventListener('keydown',e=>e.stopPropagation());
-$('charName').oninput=e=>{settings.charName=e.target.value.trim().slice(0,20)||'Miku';saveSettings();};
+$('charName').oninput=e=>{settings.charName=e.target.value.trim().slice(0,20)||'Miku';saveSettings();refreshImgNames();};
 $('chorus').onchange=e=>{settings.chorus=e.target.checked;saveSettings();updateSongInfo();};
 let padLearn=-1;
 let padLearnDir=-1,dirBase=null,dirArmed=false;
@@ -906,6 +908,47 @@ $('layout').onchange=e=>{settings.layout=e.target.value;saveSettings();updateSon
 $('diff').onchange=e=>{settings.diff=e.target.value;saveSettings();updateSongInfo();};
 
 // ---- partie ----
+// ---- Bonus RGB : à un moment propre à chaque morceau, 5 à 10 notes de suite ; toutes en PERFECT = gros bonus ----
+function songSeed(){
+  const an=song.an, s=(song.name||'')+'|'+Math.round(an.duration*100)+'|'+Math.round(an.bpm*10)+'|'+Math.round(an.offset*1000);
+  let x=2166136261>>>0; for(let i=0;i<s.length;i++){ x^=s.charCodeAt(i); x=Math.imul(x,16777619)>>>0; }
+  x^=x>>>15; x=Math.imul(x,2246822519)>>>0; x^=x>>>13; return x>>>0;
+}
+function planBonus(){
+  const sd=songSeed(), an=song.an;
+  let N=5+(sd%6);
+  const frac=0.25+(((sd>>>4)%1000)/1000)*0.4;
+  const t0=an.offset+(an.duration-an.offset)*frac;
+  const plain=n=>!n.slider&&!n.hold&&!n.nox;
+  for(;N>=5;N--){
+    let start=-1;
+    for(let pass=0;pass<2&&start<0;pass++){
+      for(let i=0;i+N<=chart.length;i++){
+        if(pass===0&&chart[i].t<t0) continue;
+        let ok=true; for(let j=0;j<N;j++) if(!plain(chart[i+j])){ok=false;break;}
+        if(ok){start=i;break;}
+      }
+    }
+    if(start>=0){ for(let j=0;j<N;j++) chart[start+j].rgb=true; return {i0:start,N,streak:0,state:'idle',gain:N*800,t0:chart[start].t}; }
+  }
+  return null;
+}
+function bonusJudge(j,note){
+  const b=bonus; if(!b||!note.rgb||b.state==='fail'||b.state==='done') return;
+  if(j==='perfect'){
+    b.streak++; b.state='run';
+    if(b.streak>=b.N){
+      b.state='done'; score+=b.gain;
+      const p=notePos(note,1); popups.push({x:p.x,y:p.y-R*2.6,text:'🌈 RGB BONUS +'+b.gain,color:'#ff7ad9',born:performance.now()});
+      for(let k=0;k<3;k++) bursts.push({x:p.x,y:p.y,color:['#ff4d6d','#3ddc84','#7ab8ff'][k],born:performance.now()+k*60});
+    }
+  } else {
+    b.state='fail';
+    for(const n of chart) n.rgb=false;
+    const p=notePos(note,1); popups.push({x:p.x,y:p.y-R*2.6,text:'RGB BONUS ✕',color:'#9aa0c8',born:performance.now()});
+  }
+}
+let bonus=null;
 async function startGame(){
   if(!song||starting) return;
   starting=true;
@@ -914,9 +957,10 @@ async function startGame(){
   starting=false;
   chart=buildChart(song.an,settings.diff,settings.layout,{fw,fh,R,rep:settings.chorus!==false});
   if(!chart.length){alert(t('a_nonotes'));return;}
+  bonus=planBonus();
   approach=settings.speed;
   nextIdx=0;score=0;combo=0;maxCombo=0;popups=[];bursts=[];flash=[0,0,0,0];
-  liveHolds=[];life=100;lifeFlash=0;dmgScale=clamp(Math.sqrt(150/chart.length),0.45,1.15);maxScore=calcMax();
+  liveHolds=[];life=100;lifeFlash=0;dmgScale=clamp(Math.sqrt(150/chart.length),0.45,1.15);maxScore=calcMax()+(bonus?bonus.gain:0);
   counts={perfect:0,good:0,almost:0,miss:0,wrong:0};
   const lead=approach+1.8;
   stopSrc();
@@ -1029,6 +1073,7 @@ function rankFx(g){
 function registerJudge(j,note,isEnd){
   counts[j]++;
   const J=JUDGE[j];
+  if(!isEnd) bonusJudge(j,note);
   if((j==='miss'||j==='wrong')&&settings.diff==='nightmare'&&state==='playing'&&!isEnd) die();
   if(!isEnd) applyLife(j);
   if(j==='miss'||j==='wrong') combo=0; else {combo++; if(combo>maxCombo) maxCombo=combo;}
@@ -1268,7 +1313,18 @@ function calcMax(){
   return Math.max(1,s);
 }
 function rr(x,y,w,h,r){ r=Math.min(r,h/2,w/2); g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+function drawBonusHud(T,now){
+  const b=bonus; if(!b||b.state==='fail'||b.state==='done') return;
+  const first=chart[b.i0]; if(!first||T<first.t-approach-1.5) return;
+  g.save(); g.textAlign='center'; g.textBaseline='middle';
+  g.font='900 '+Math.round(R*0.5)+'px system-ui,sans-serif'; g.lineWidth=4; g.strokeStyle='#10102a';
+  const txt='🌈 RGB BONUS  '+b.streak+' / '+b.N+'  · PERFECT ONLY';
+  const gr=g.createLinearGradient(W/2-150,0,W/2+150,0); ['#ff3b5c','#ffd93d','#3dff8a','#3dc8ff','#ff3bd9'].forEach((c,i,a)=>gr.addColorStop(i/(a.length-1),c));
+  g.fillStyle=gr; const y=fy+R*0.9; g.strokeText(txt,W/2,y); g.fillText(txt,W/2,y);
+  g.restore();
+}
 function drawHud(T,now){
+  drawBonusHud(T,now);
   const x0=14, bw=W-28-70;
   g.save();
   g.textAlign='left'; g.textBaseline='top'; g.fillStyle='#fff'; g.font='800 20px system-ui,sans-serif';
@@ -1302,6 +1358,16 @@ function drawHud(T,now){
   g.globalAlpha=1; g.beginPath(); g.arc(kx,ky,th*0.55,0,6.2832); g.fillStyle='#fff'; g.fill(); g.lineWidth=2; g.strokeStyle='#ff7ad9'; g.stroke();
   const rem=Math.max(0,Math.ceil(dur-T)); g.font='700 11px system-ui,sans-serif'; g.textAlign='right'; g.textBaseline='top'; g.fillStyle='#fff';
   g.fillText('⏱ '+Math.floor(rem/60)+':'+String(rem%60).padStart(2,'0'),x0+bw,ty+th+3);
+  g.restore();
+}
+function rgbBubble(x,y,r,now,a){
+  g.save(); const rot=now/900;
+  let grad;
+  if(g.createConicGradient){ grad=g.createConicGradient(rot,x,y); ['#ff3b5c','#ffd93d','#3dff8a','#3dc8ff','#8a5cff','#ff3bd9','#ff3b5c'].forEach((c,i,arr)=>grad.addColorStop(i/(arr.length-1),c)); }
+  else { grad=g.createLinearGradient(x-r,y-r,x+r,y+r); ['#ff3b5c','#ffd93d','#3dff8a','#3dc8ff','#8a5cff'].forEach((c,i,arr)=>grad.addColorStop(i/(arr.length-1),c)); }
+  g.globalAlpha=a*0.16; g.fillStyle=grad; g.beginPath(); g.arc(x,y,r,0,6.2832); g.fill();      // bulle légèrement transparente
+  g.globalAlpha=a*0.75; g.lineWidth=Math.max(2,r*0.09); g.strokeStyle=grad; g.beginPath(); g.arc(x,y,r,0,6.2832); g.stroke(); // bord arc-en-ciel
+  g.globalAlpha=a*0.45; g.fillStyle='#fff'; g.beginPath(); g.ellipse(x-r*0.38,y-r*0.45,r*0.2,r*0.1,-0.7,0,6.2832); g.fill(); // reflet
   g.restore();
 }
 function drawHoldLabel(n,T){
@@ -1407,7 +1473,14 @@ let user=null, spk=null;
 const CHS={idle:{el:$('charImg'),ok:false,key:'rh_char_idle'},talk:{el:$('charImgTalk'),ok:false,key:'rh_char'}};
 try{ user=localStorage.getItem('rh_user'); }catch(e){}
 function charReady(){ return CHS.idle.ok||CHS.talk.ok; }
-function refreshClear(){ document.querySelectorAll('.charClear').forEach(b=>b.style.display=charReady()?'block':'none'); }
+function refreshClear(){ document.querySelectorAll('.charClear').forEach(b=>b.style.display=charReady()?'block':'none'); refreshImgNames(); }
+function refreshImgNames(){
+  const c=$('charImgName'), m=$('menuImgName'); if(!c||!m) return;
+  c.style.display='block'; c.value=(settings.charName&&settings.charName!=='Miku')?settings.charName:'';
+  m.style.display=(typeof menuImg!=='undefined'&&menuImg)?'block':'none'; m.value=settings.menuImgName||'';
+  c.placeholder=t('imgname_char')+' (Miku)'; m.placeholder=t('imgname_menu');
+}
+['charImgName','menuImgName'].forEach(id=>{ const el=$(id); el.addEventListener('keydown',e=>e.stopPropagation()); el.oninput=e=>{ const v=e.target.value.slice(0,30); if(id==='charImgName'){ settings.charName=v.trim()||'Miku'; if($('charName')) $('charName').value=settings.charName; } else settings.menuImgName=v; saveSettings(); }; });
 function setChar(slot,url){
   const c=CHS[slot];
   if(!url){ c.ok=false; c.el.removeAttribute('src'); refreshClear(); return; }
@@ -1520,9 +1593,9 @@ $('changeName').onclick=showLogin;
 // ---- image de fond du menu (choisie par l'utilisateur) ----
 let menuImg=null;
 function setMenuImg(url){
-  if(!url){ menuImg=null; $('menu').classList.remove('withbg'); $('menuimgClear').style.display='none'; return; }
+  if(!url){ menuImg=null; $('menu').classList.remove('withbg'); $('menuimgClear').style.display='none'; refreshImgNames(); return; }
   const im=new Image();
-  im.onload=()=>{ menuImg=im; $('menu').classList.add('withbg'); $('menuimgClear').style.display='block'; };
+  im.onload=()=>{ menuImg=im; $('menu').classList.add('withbg'); $('menuimgClear').style.display='block'; refreshImgNames(); };
   im.onerror=()=>{ alert(t('a_img')); };
   im.src=url;
 }
@@ -1533,13 +1606,13 @@ $('menuimgfile').addEventListener('change',e=>{
     const s=Math.min(1,1280/Math.max(im.width,im.height)), c=document.createElement('canvas');
     c.width=Math.max(1,Math.round(im.width*s)); c.height=Math.max(1,Math.round(im.height*s));
     c.getContext('2d').drawImage(im,0,0,c.width,c.height); URL.revokeObjectURL(u);
-    const d=c.toDataURL('image/jpeg',0.82); setMenuImg(d);
+    const d=c.toDataURL('image/jpeg',0.82); if(!settings.menuImgName){ settings.menuImgName=(f.name||'').replace(/\.[^.]+$/,'').slice(0,30); saveSettings(); } setMenuImg(d);
     try{localStorage.setItem('rh_menuimg',d);}catch(err){}
   };
   im.onerror=()=>{ URL.revokeObjectURL(u); alert(t('a_img')); };
   im.src=u;
 });
-$('menuimgClear').onclick=()=>{ setMenuImg(null); try{localStorage.removeItem('rh_menuimg');}catch(err){} };
+$('menuimgClear').onclick=()=>{ settings.menuImgName=''; saveSettings(); setMenuImg(null); try{localStorage.removeItem('rh_menuimg');}catch(err){} };
 try{ const d=localStorage.getItem('rh_menuimg'); if(d) setMenuImg(d); }catch(err){}
 
 function drawBg(T,now){
@@ -1647,6 +1720,7 @@ function render(){
       const fr=first?1.2:1.05;
       g.beginPath();g.arc(pos.x,pos.y,R*fr,0,6.2832);g.fillStyle='#10102a';g.fill();
       shape(n.type,pos.x,pos.y,R*(first?0.95:0.8),col,0.35,first?6:5);
+      if(n.rgb){ g.globalAlpha=1; rgbBubble(tp.x,tp.y,R*1.7,now,Math.max(fade,0.5)); rgbBubble(pos.x,pos.y,R*1.45,now,Math.max(fade,0.5)); }
       // numéro d'ordre (1, 2, 3)
       if(i<3){
         const bx=tp.x+R*1.1, by=tp.y-R*1.1, br=R*0.36;
