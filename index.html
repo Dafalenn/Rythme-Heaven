@@ -116,7 +116,7 @@ select{font:inherit;padding:10px;border-radius:10px;background:#1a1a38;color:#ff
   <div id="playBox" style="display:none">
    <div class="row">
     <label class="s" style="flex:2"><span data-i18n="diff"></span>
-     <select id="diff"><option value="easy" data-i18n="d_easy"></option><option value="normal" selected data-i18n="d_normal"></option><option value="hard" data-i18n="d_hard"></option><option value="hardcore" data-i18n="d_hardcore"></option><option value="impossible" data-i18n="d_impossible"></option></select></label>
+     <select id="diff"><option value="easy" data-i18n="d_easy"></option><option value="normal" selected data-i18n="d_normal"></option><option value="hard" data-i18n="d_hard"></option><option value="nightmare">NIGHTMARE ☠ (1 Miss = fail)</option></select></label>
     <button id="bpmHalf" class="alt" data-i18n-title="bpmfix">BPM ÷2</button>
     <button id="bpmDouble" class="alt" data-i18n-title="bpmfix">BPM ×2</button>
    </div>
@@ -132,6 +132,8 @@ select{font:inherit;padding:10px;border-radius:10px;background:#1a1a38;color:#ff
      <select id="layout"><option value="flow" data-i18n="l_flow"></option><option value="scatter" data-i18n="l_scatter"></option></select></label>
     <label class="chk"><input id="any" type="checkbox"> <span data-i18n="any"></span></label>
     <label class="chk"><input id="eco" type="checkbox"> <span data-i18n="eco"></span></label>
+    <label class="chk"><input id="chorus" type="checkbox"> <span data-i18n="samechorus"></span></label>
+    <label>🎭 <span data-i18n="charname"></span> <input id="charName" type="text" maxlength="20" style="width:100%;box-sizing:border-box"></label>
     <button id="padCal" class="alt" style="padding:10px" data-i18n="padcal"></button>
     <button id="padCalDir" class="alt" style="padding:10px" data-i18n="padcaldir"></button>
     <pre id="padMon" class="info" style="white-space:pre-wrap;font-size:11px;margin:0;background:#15153a;border-radius:10px;padding:8px">—</pre>
@@ -242,6 +244,8 @@ async function analyze(ch0, ch1, sr, onProgress){
   let prev=new Float32Array(half), cur=new Float32Array(half);
   const fLow=new Float32Array(frames), fAll=new Float32Array(frames), fVox=new Float32Array(frames), cen=new Float32Array(frames), rms=new Float32Array(frames);
   const lowHi=Math.round(180*N/sr2), vLo=Math.round(300*N/sr2), vHi=Math.round(3400*N/sr2);
+  const chroma=new Float32Array(frames*12), vE=new Float32Array(frames), pcOf=new Int8Array(half).fill(-1);
+  for(let k=1;k<half;k++){ const fq=k*sr2/N; if(fq>=180&&fq<=2000) pcOf[k]=((Math.round(12*Math.log2(fq/261.6256))%12)+12)%12; }
   for(let f=0;f<frames;f++){
     const o=f*HOP; let e=0;
     for(let i=0;i<N;i++){const v=x[o+i]||0; e+=v*v; re[i]=v*win[i]; im[i]=0;}
@@ -249,12 +253,13 @@ async function analyze(ch0, ch1, sr, onProgress){
     fft(re,im);
     let sa=0,sv=0,sl=0,cw=0,cs=0;
     for(let k=1;k<half;k++){
-      const m=Math.log(1+Math.sqrt(re[k]*re[k]+im[k]*im[k])*20);
+      const mg=Math.sqrt(re[k]*re[k]+im[k]*im[k]), m=Math.log(1+mg*20);
+      if(pcOf[k]>=0) chroma[f*12+pcOf[k]]+=mg;
       cur[k]=m;
       const d=m-prev[k];
       const inV=(k>=vLo&&k<=vHi);
       if(d>0){sa+=d; if(inV) sv+=d; if(k<=lowHi) sl+=d;}
-      if(inV){cw+=m*k; cs+=m;}
+      if(inV){cw+=m*k; cs+=m; vE[f]+=mg;}
     }
     fAll[f]=sa; fVox[f]=sv; fLow[f]=sl; cen[f]=cs>0?cw/cs:0;
     const t=prev; prev=cur; cur=t;
@@ -262,6 +267,23 @@ async function analyze(ch0, ch1, sr, onProgress){
   }
   const fr=sr2/HOP;
   const env=normFlux(fAll), vox=normFlux(fVox), low=normFlux(fLow);
+  // ---- notes longues tenues (voix « ahhh », cri, note tenue) : son stable, tonal, sans nouvelle attaque ----
+  const sust=[];
+  {
+    const sv=Array.from(vE).sort((a,b)=>a-b), vP=sv[Math.floor(sv.length*0.95)]||1e-6;
+    let rm=0; for(let i=0;i<frames;i++) if(rms[i]>rm) rm=rms[i];
+    const lagF=Math.max(2,Math.round(0.08*fr)), st=new Uint8Array(frames);
+    for(let f=lagF;f<frames;f++){
+      const a=f*12,b=(f-lagF)*12; let dot=0,na=0,nb=0,mx=0,sm=0;
+      for(let c=0;c<12;c++){ const x=chroma[a+c],y=chroma[b+c]; dot+=x*y; na+=x*x; nb+=y*y; sm+=x; if(x>mx) mx=x; }
+      const cs=dot/Math.sqrt(na*nb+1e-12), pk=sm>0?mx/sm:0;
+      st[f]=(cs>0.93&&pk>0.2&&vox[f]<0.6&&vE[f]>0.3*vP&&rms[f]>0.05*rm)?1:0;
+    }
+    const minF=Math.ceil(0.9*fr), gapF=Math.ceil(0.12*fr); let s=-1,last=-1;
+    const push=()=>{ if(s>=0&&last-s+1>=minF) sust.push({t0:(s*HOP+N/2)/sr2,t1:(last*HOP+N/2)/sr2}); s=-1; };
+    for(let f=0;f<frames;f++){ if(st[f]){ if(s<0) s=f; last=f; } else if(s>=0&&f-last>gapF) push(); }
+    push();
+  }
   // le grave (grosse caisse) sert surtout à caler la phase sur les temps forts
   const envPhase=new Float32Array(frames); for(let i=0;i<frames;i++) envPhase[i]=env[i]+1.2*low[i];
 
@@ -300,16 +322,90 @@ async function analyze(ch0, ch1, sr, onProgress){
   const beat0=(bp*HOP+N/2)/sr2+0.014; // correction empirique du retard de détection du flux
   let offset=beat0%beat;
   let rmsMax=0; for(let i=0;i<frames;i++) if(rms[i]>rmsMax) rmsMax=rms[i];
-  return {bpm:bb,beat,offset,duration:ch0.length/sr,fr,hop:HOP,N,sr2,frames,fVox:vox,fAll:env,cen,rms,rmsMax};
+  return {bpm:bb,beat,offset,duration:ch0.length/sr,fr,hop:HOP,N,sr2,frames,fVox:vox,fAll:env,cen,rms,rmsMax,chroma,sust};
 }
 
 // ---------- Génération de la partition (notes) ----------
 // Les notes d'un morceau sont toujours les mêmes : Facile ⊂ Normal ⊂ Difficile.
 // Monter en difficulté AJOUTE des notes sans changer celles du niveau inférieur.
-const LEVELS={easy:{frac:0.2,gap:0.45},normal:{frac:0.34,gap:0.25},hard:{frac:0.5,gap:0.2},hardcore:{frac:0.8,gap:0.11},impossible:{frac:1.0,gap:0.09}};
-const LEVEL_ORDER=['easy','normal','hard','hardcore','impossible'];
+const LEVELS={easy:{frac:0.17,gap:0.5},normal:{frac:0.26,gap:0.34},hard:{frac:0.5,gap:0.2},nightmare:{frac:1.0,gap:0.09}};
+const LEVEL_ORDER=['easy','normal','hard','nightmare'];
 function clamp(v,a,b){return v<a?a:v>b?b:v;}
 function gridBonus(k){ return (k%4===0?0.25:(k%2===0?0.12:0))+(k%16===0?0.1:0); }
+// Sections qui se répètent (refrain...) : on recopie exactement les mêmes notes (mêmes touches, mêmes positions)
+function applyRepeats(an,notes){
+  const nb=Math.floor((an.duration-an.offset)/an.beat), W=8;
+  if(!an.chroma||nb<W*3||notes.length<12) return notes;
+  const v=new Float32Array(nb*12), loud=new Float32Array(nb), rmax=an.rmsMax||1;
+  for(let b=0;b<nb;b++){
+    const f0=Math.max(0,Math.round(((an.offset+b*an.beat)*an.sr2-an.N/2)/an.hop)), f1=Math.min(an.frames-1,Math.round(((an.offset+(b+1)*an.beat)*an.sr2-an.N/2)/an.hop));
+    let cnt=0,r=0,s=0;
+    for(let f=f0;f<=f1;f++){ for(let c=0;c<12;c++){ v[b*12+c]+=an.chroma[f*12+c]; } r+=an.rms[f]; cnt++; }
+    for(let c=0;c<12;c++) s+=v[b*12+c];
+    if(s>0) for(let c=0;c<12;c++) v[b*12+c]/=s;
+    loud[b]=cnt?r/cnt/rmax:0;
+  }
+  const mean=new Float32Array(12);
+  for(let b=0;b<nb;b++) for(let c=0;c<12;c++) mean[c]+=v[b*12+c]/nb;
+  for(let b=0;b<nb;b++){ let n2=0; for(let c=0;c<12;c++){ v[b*12+c]-=mean[c]; n2+=v[b*12+c]*v[b*12+c]; } n2=Math.sqrt(n2)||1; for(let c=0;c<12;c++) v[b*12+c]/=n2; }
+  const beatOf=n=>Math.floor((n.t-an.offset)/an.beat+1e-9);
+  const cntN=new Int32Array(nb+W+2); for(const n of notes){ const b=beatOf(n); if(b>=0&&b<nb) cntN[b]++; }
+  const win=(a,len)=>{ let s=0; for(let i=0;i<len;i++) s+=a[i]; return s; };
+  const copied=new Uint8Array(nb), segs=[];
+  const susB=new Uint8Array(nb); for(const r of (an.sust||[])){ for(let b=Math.max(0,Math.floor((r.t0-an.offset)/an.beat));b<=Math.min(nb-1,Math.floor((r.t1-an.offset)/an.beat));b++) susB[b]=1; }
+  const thr=0.7;
+  let p=0;
+  while(p+W<=nb){
+    let bq=-1,bs=thr;
+    let lp=0; for(let i=0;i<W;i++) lp+=loud[p+i]; lp/=W;
+    let sp=false; for(let i=0;i<W;i++) if(susB[p+i]) sp=true;
+    if(lp>0.1&&!sp){
+      for(let q=0;q+W<=p;q++){
+        let ok=true,lq=0,nq=0; for(let i=0;i<W;i++){ if(copied[q+i]||susB[q+i]){ok=false;break;} lq+=loud[q+i]; nq+=cntN[q+i]; }
+        if(!ok||lq/W<=0.1||nq<3) continue;
+        let sim=0; for(let i=0;i<W;i++){ let d=0; for(let c=0;c<12;c++) d+=v[(p+i)*12+c]*v[(q+i)*12+c]; sim+=d; } sim/=W;
+        if(sim>bs){bs=sim;bq=q;}
+      }
+    }
+    if(bq>=0){ segs.push({p,q:bq}); for(let i=0;i<W;i++) copied[p+i]=1; p+=W; } else p++;
+  }
+  if(!segs.length) return notes;
+  const out=notes.filter(n=>{ const b=beatOf(n); return !(b>=0&&b<nb&&copied[b]); });
+  for(const s of segs){
+    for(const n of notes){
+      const b=beatOf(n); if(b<s.q||b>=s.q+W) continue;
+      const t2=n.t+(s.p-s.q)*an.beat; if(t2>an.duration-0.6) continue;
+      out.push(Object.assign({},n,{t:t2,done:false}));
+    }
+  }
+  out.sort((a,b)=>a.t-b.t);
+  // un HOLD recopié ne doit pas chevaucher une note du même symbole
+  for(const hn of out.filter(n=>n.hold&&!n.nox||n.hold)){
+    for(let i=out.length-1;i>=0;i--){ const m=out[i]; if(m!==hn&&m.type===hn.type&&m.t>hn.t+0.05&&m.t<hn.t+hn.hold.d+0.1) out.splice(i,1); }
+  }
+  return out;
+}
+function separateNotes(out,geo){
+  const D=2.5*geo.R, mnx=0.12, mxx=0.88, mny=0.2, mxy=0.8, placed=[];
+  const span=n=>[n.t-0.9,n.t+(n.hold?n.hold.d:0.3)];
+  for(const n of out){
+    if(n.nox){ placed.push(n); continue; }
+    const [a0,a1]=span(n);
+    const near=placed.filter(m=>{ const [b0,b1]=span(m); return a0<b1&&b0<a1; });
+    const bad=(x,y)=>near.some(m=>Math.hypot((x-m.x)*geo.fw,(y-m.y)*geo.fh)<D);
+    if(bad(n.x,n.y)){
+      let best=null,bd=1e9;
+      for(let ri=1;ri<=3&&!best;ri++) for(let ai=0;ai<16;ai++){
+        const ang=(ai/16)*6.2832+n.k*0.37, rr=D*(1+0.5*(ri-1))*1.05;
+        const x=clamp(n.x+rr*Math.cos(ang)/geo.fw,mnx,mxx), y=clamp(n.y+rr*Math.sin(ang)/geo.fh,mny,mxy);
+        if(bad(x,y)) continue;
+        const d=Math.hypot((x-n.x)*geo.fw,(y-n.y)*geo.fh); if(d<bd){bd=d;best={x,y};}
+      }
+      if(best){ const dx=best.x-n.x, dy=best.y-n.y; n.x=best.x; n.y=best.y; n.cx+=dx; n.cy+=dy; }
+    }
+    placed.push(n);
+  }
+}
 function buildChart(an, diff, layout, geo){
   geo=geo||{fw:800,fh:300,R:30};
   const slot=an.beat/4;                       // grille de double-croches
@@ -417,7 +513,7 @@ function buildChart(an, diff, layout, geo){
   // SLIDERS : sur les grands silences entre deux notes, une note sur deux devient un slider (tenir / glisser)
   for(let i=0;i<out.length-1;i++){
     const n=out[i], gap=out[i+1].t-n.t;
-    if(gap<Math.max(1.3,2.5*an.beat)||((n.k>>2)&1)) continue;
+    if(n.nox||gap<Math.max(1.3,2.5*an.beat)||((n.k>>2)&1)) continue;
     const d=Math.min(gap-0.7,1.8,Math.max(0.7,2*an.beat));
     if(d<0.5) continue;
     const L=Math.min(geo.fw,geo.fh)*0.34;
@@ -428,17 +524,49 @@ function buildChart(an, diff, layout, geo){
     ang=Math.atan2((ey-n.y)*geo.fh,(ex-n.x)*geo.fw);
     n.slider={d,ex,ey,ang};
   }
+  // NOTES LONGUES CHANTÉES (« ahhh », cri) : un long HOLD, ou (niveaux Difficile et plus, une fois sur deux) une suite rapide du même symbole
+  const busy=[], adds=[]; let freeAt=-1e9;
+  const lvlI=Math.max(0,LEVEL_ORDER.indexOf(diff));
+  (an.sust||[]).forEach((r,ri)=>{
+    const t0=r.t0, t1=r.t1, len=t1-t0;
+    let head=null,bd=0.3;
+    for(const n of out){ const d=Math.abs(n.t-t0); if(d<bd&&!n.nox){bd=d;head=n;} }
+    if(!head){
+      let prev=null; for(const n of out){ if(n.t<t0) prev=n; else break; }
+      const b0=prev||out[0]; if(!b0) return;
+      const kk=Math.round((t0-an.offset)/slot);
+      head=Object.assign({},b0,{t:an.offset+kk*slot,k:kk,type:(b0.type+1)%4,done:false,nox:false});
+      delete head.hold; delete head.slider; out.push(head);
+    }
+    delete head.slider; delete head.hold;
+    const streak=lvlI>=2&&(ri%2===1);
+    if(!streak){
+      const d=Math.min(len-0.2,4.0); if(d<0.7) return;
+      head.hold={d}; head.nox=true;
+      const guard=2+(((head.k*7)%10)/10)*3;
+      busy.push({a:head.t,b:head.t+d+guard,type:head.type,vh:true});
+      for(let i=out.length-1;i>=0;i--){ const n=out[i]; if(n!==head&&n.t>head.t+0.05&&n.t<head.t+d&&n.type===head.type) out.splice(i,1); else if(n!==head&&n.t>t0-0.05&&n.t<t1) delete n.slider; }
+    } else {
+      const iv=an.beat/(lvlI>=3?4:2), cnt=Math.min(16,Math.floor((t1-t0-0.1)/iv));
+      if(cnt<3) return;
+      for(let i=out.length-1;i>=0;i--){ const n=out[i]; if(n!==head&&n.t>head.t+0.05&&n.t<head.t+cnt*iv+0.2) out.splice(i,1); }
+      head.nox=true;
+      for(let i=1;i<=cnt;i++) out.push(Object.assign({},head,{t:head.t+i*iv,k:head.k+i,done:false,nox:true}));
+      busy.push({a:head.t,b:head.t+cnt*iv+0.3,type:head.type,vh:true,noType:true});
+    }
+  });
+  out.sort((a,b)=>a.t-b.t);
   // HOLD : maintenir la touche pour gagner plus de points.
   // Pas de symbole identique pendant le hold ni 2 à 5 s après ; 2 holds de types différents seulement avant un « blanc » (grand silence / changement de phase).
   const sliderSpans=out.filter(n=>n.slider).map(n=>[n.t,n.t+n.slider.d]);
-  const busy=[], adds=[]; let freeAt=-1e9;
   for(let i=0;i<out.length-1;i++){
-    const n=out[i]; if(n.slider||n.t<freeAt) continue;
+    const n=out[i]; if(n.slider||n.nox||n.t<freeAt) continue;
     if(((n.k>>2)%5)!==2||(n.k&3)) continue;
     const gap=out[i+1].t-n.t, blank=gap>=Math.max(2.2,4*an.beat);
     let d=clamp(0.9+((n.k>>2)%4)*0.45,0.9,2.4);
     if(blank) d=Math.min(d,gap-0.6);
     if(d<0.7) continue;
+    if(busy.some(b=>b.vh&&n.t<b.b&&n.t+d>b.a-0.2)) continue;
     if(sliderSpans.some(s=>s[0]<n.t+d+0.2&&s[1]>n.t-0.2)) continue;
     const guard=2+(((n.k*7)%10)/10)*3, end=n.t+d;
     n.hold={d}; busy.push({a:n.t,b:end+guard,type:n.type});
@@ -451,13 +579,16 @@ function buildChart(an, diff, layout, geo){
   for(const m of adds) out.push(m);
   out.sort((a,b)=>a.t-b.t);
   for(const n of out){
-    if(n.hold) continue;
-    const act=busy.filter(b=>n.t>b.a+0.001&&n.t<b.b);
+    if(n.hold||n.nox) continue;
+    const act=busy.filter(b=>!b.noType&&n.t>b.a+0.001&&n.t<b.b);
     if(act.some(b=>b.type===n.type)){
       for(let s=1;s<4;s++){ const ty=(n.type+s)%4; if(!act.some(b=>b.type===ty)){ n.type=ty; break; } }
     }
   }
-  return out;
+  // Les symboles visibles en même temps ne doivent pas se recouvrir : on écarte les cibles trop proches
+  separateNotes(out,geo);
+  if(geo.rep===false) return out;
+  const res=applyRepeats(an,out); separateNotes(res,geo); return res;
 }
 
 // ---------- Morceau de démo généré (128 BPM, mélodie "voix") ----------
@@ -530,7 +661,7 @@ const DEFAULT_KEYS=()=>[
   [{c:'KeyA'},{c:'ArrowLeft'}],    // 3 □
   [{c:'Space'},null]               // 4 n'importe quelle note
 ];
-const settings={ver:2,lang:'auto',speed:2.0,offset:0,any:false,eco:false,padFace:[0,1,2,3],diff:'normal',layout:'flow',keys:DEFAULT_KEYS()};
+const settings={ver:2,lang:'auto',speed:2.0,offset:0,any:false,eco:false,chorus:true,padFace:[0,1,2,3],diff:'normal',layout:'flow',keys:DEFAULT_KEYS()};
 try{const s=JSON.parse(localStorage.getItem('neonflight')||'{}'); Object.assign(settings,s);}catch(e){}
 if(settings.ver!==2){ settings.speed=2.0; settings.ver=2; }   // notes plus lentes par défaut
 /*I18N_START*/
@@ -554,10 +685,10 @@ zh:['节奏游戏 · 飞行音符 · 触屏与手柄','📂 导入歌曲','▶ �
 const DICT={};
 for(const c in I18N_DATA){ DICT[c]={}; I18N_KEYS.forEach((k,i)=>{DICT[c][k]=I18N_DATA[c][i];}); }
 /*I18N_END*/
-const EXTRA_KEYS=['say_hi','say_nice','say_luck','say_pause','login_title','login_ph','login_btn','change_name','char_btn','padcal','padlearn','padok','padcaldir','dirlearn','dirok'];
+const EXTRA_KEYS=['say_hi','say_nice','say_luck','say_pause','login_title','login_ph','login_btn','change_name','char_btn','padcal','padlearn','padok','padcaldir','dirlearn','dirok','samechorus','charname'];
 const EXTRA={
-en:["Hi, I'm Miku! And you?","Nice to meet you, {0}!","Good luck! … you're going to need it..","HEY! I was listening!","Choose your name","Username","Let's go","✎ Change name","🎭 Character image (transparent PNG)","🎮 Set up gamepad buttons","Press the button for: {0}","Gamepad buttons saved.","🎮 Set up the D-pad","Press on the D-pad: {0}","D-pad saved."],
-fr:["Salut je suis Miku ! Et toi ?","Enchantée, {0} !","Bonne chance ! … tu en auras besoin..","HEY ! J'étais en train d'écouter !","Choisis ton nom","Nom d'utilisateur","C'est parti","✎ Changer de nom","🎭 Image du personnage (PNG transparent)","🎮 Configurer les boutons de la manette","Appuyez sur le bouton pour : {0}","Boutons de la manette enregistrés.","🎮 Configurer la croix directionnelle","Appuyez sur la croix : {0}","Croix directionnelle enregistrée."],
+en:["Hi, I'm Miku! And you?","Nice to meet you, {0}!","Good luck! … you're going to need it..","HEY! I was listening!","Choose your name","Username","Let's go","✎ Change name","🎭 Character image (transparent PNG)","🎮 Set up gamepad buttons","Press the button for: {0}","Gamepad buttons saved.","🎮 Set up the D-pad","Press on the D-pad: {0}","D-pad saved.","Identical notes in repeated sections (chorus)","Character name"],
+fr:["Salut je suis Miku ! Et toi ?","Enchantée, {0} !","Bonne chance ! … tu en auras besoin..","HEY ! J'étais en train d'écouter !","Choisis ton nom","Nom d'utilisateur","C'est parti","✎ Changer de nom","🎭 Image du personnage (PNG transparent)","🎮 Configurer les boutons de la manette","Appuyez sur le bouton pour : {0}","Boutons de la manette enregistrés.","🎮 Configurer la croix directionnelle","Appuyez sur la croix : {0}","Croix directionnelle enregistrée.","Notes identiques dans les parties répétées (refrain)","Nom du personnage"],
 es:["¡Hola, soy Miku! ¿Y tú?","¡Encantada, {0}!","¡Buena suerte! … la vas a necesitar..","¡EH! ¡Estaba escuchando!","Elige tu nombre","Nombre de usuario","Vamos","✎ Cambiar nombre","🎭 Imagen del personaje (PNG transparente)"],
 de:["Hi, ich bin Miku! Und du?","Freut mich, {0}!","Viel Glück! … das wirst du brauchen..","HEY! Ich hab gerade zugehört!","Wähle deinen Namen","Benutzername","Los geht's","✎ Name ändern","🎭 Charakterbild (transparentes PNG)"],
 it:["Ciao, sono Miku! E tu?","Piacere, {0}!","Buona fortuna! … ti servirà..","EHI! Stavo ascoltando!","Scegli il tuo nome","Nome utente","Andiamo","✎ Cambia nome","🎭 Immagine del personaggio (PNG trasparente)"],
@@ -588,7 +719,8 @@ function detectLang(){
 }
 function t(k,...a){
   let s=DICT[LANG]&&DICT[LANG][k]; if(s==null) s=DICT.en[k]; if(s==null) return k;
-  return s.replace(/\{(\d+)\}/g,(m,i)=>a[i]!==undefined?a[i]:'');
+  s=s.replace(/\{(\d+)\}/g,(m,i)=>a[i]!==undefined?a[i]:'');
+  return (typeof settings!=='undefined'&&settings.charName&&settings.charName!=='Miku')?s.replace(/Miku/g,settings.charName):s;
 }
 let padStateArgs=['pad_none'], bgNameText=null, lrcNameText=null;
 function updatePadState(){
@@ -618,6 +750,8 @@ function applyI18n(){
   if(typeof updateSongInfo==='function') updateSongInfo();
 }
 if(!Array.isArray(settings.keys)||settings.keys.length!==5||settings.keys.some(r=>!Array.isArray(r)||r.length!==2)) settings.keys=DEFAULT_KEYS();
+if(settings.diff==='hardcore') settings.diff='hard'; if(settings.diff==='impossible') settings.diff='nightmare';
+if(typeof settings.charName!=='string'||!settings.charName.trim()) settings.charName='Miku';
 if(!Array.isArray(settings.padFace)||settings.padFace.length!==4) settings.padFace=[0,1,2,3];
 if(!Array.isArray(settings.padDir)||settings.padDir.length!==4) settings.padDir=[null,null,null,null];
 function saveSettings(){try{localStorage.setItem('neonflight',JSON.stringify(settings));}catch(e){}}
@@ -712,7 +846,7 @@ async function loadSong(name,buffer){
 }
 function updateSongInfo(){
   if(!song){ $('songInfo').style.display='none'; $('playBox').style.display='none'; return; }
-  const n=buildChart(song.an,settings.diff,settings.layout,{fw,fh,R}).length;
+  const n=buildChart(song.an,settings.diff,settings.layout,{fw,fh,R,rep:settings.chorus!==false}).length;
   const d=song.an.duration;
   $('songInfo').style.display='block';
   $('songInfo').innerHTML=`<b>${escapeHtml(song.name)}</b><br>${t('info_line',song.an.bpm.toFixed(1),Math.floor(d/60)+':'+String(Math.floor(d%60)).padStart(2,'0'),n)}`;
@@ -752,11 +886,14 @@ $('bpmDouble').onclick=()=>fixBpm(2);
 function syncSettingsUI(){
   $('speed').value=settings.speed; $('vSpeed').textContent=(2.0/settings.speed).toFixed(1)+'×';
   $('offset').value=settings.offset; $('vOff').textContent=settings.offset+' ms';
-  $('layout').value=settings.layout; $('any').checked=settings.any; $('eco').checked=settings.eco; $('diff').value=settings.diff;
+  $('layout').value=settings.layout; $('any').checked=settings.any; $('eco').checked=settings.eco; $('chorus').checked=settings.chorus!==false; $('charName').value=settings.charName||'Miku'; $('diff').value=settings.diff;
 }
 $('speed').oninput=e=>{settings.speed=+e.target.value;syncSettingsUI();saveSettings();};
 $('offset').oninput=e=>{settings.offset=+e.target.value;syncSettingsUI();saveSettings();};
 $('any').onchange=e=>{settings.any=e.target.checked;saveSettings();};
+$('charName').addEventListener('keydown',e=>e.stopPropagation());
+$('charName').oninput=e=>{settings.charName=e.target.value.trim().slice(0,20)||'Miku';saveSettings();};
+$('chorus').onchange=e=>{settings.chorus=e.target.checked;saveSettings();updateSongInfo();};
 let padLearn=-1;
 let padLearnDir=-1,dirBase=null,dirArmed=false;
 const DIRN=['↑','↓','←','→'];
@@ -775,7 +912,7 @@ async function startGame(){
   const ctx=ensureAudio();
   try{ await Promise.race([ctx.resume(),new Promise(r=>setTimeout(r,800))]); }catch(e){}
   starting=false;
-  chart=buildChart(song.an,settings.diff,settings.layout,{fw,fh,R});
+  chart=buildChart(song.an,settings.diff,settings.layout,{fw,fh,R,rep:settings.chorus!==false});
   if(!chart.length){alert(t('a_nonotes'));return;}
   approach=settings.speed;
   nextIdx=0;score=0;combo=0;maxCombo=0;popups=[];bursts=[];flash=[0,0,0,0];
@@ -854,7 +991,7 @@ function endGame(){
   const gel=$('grade'); gel.textContent=perf?'PERFECTION':grade;
   gel.style.fontSize=perf?'clamp(30px,10vw,52px)':''; gel.style.color=perf?'#ffd93d':''; gel.style.textShadow=perf?'0 0 18px #ff7ad9,0 0 6px #ffd93d':'';
   rankFx(perf?'P':grade);
-  $('resTitle').textContent=(user?user+' · ':'')+song.name+' — '+t('d_'+settings.diff).replace(/ ?[☠(（].*$/,'');
+  $('resTitle').textContent=(user?user+' · ':'')+song.name+' — '+(settings.diff==='nightmare'?'NIGHTMARE':t('d_'+settings.diff)).replace(/ ?[☠(（].*$/,'');
   $('resStats').innerHTML=
     `<span>${t('r_score')}</span><b>${score.toLocaleString(LANG)}</b><span>${t('r_acc')}</span><b>${(acc*100).toFixed(1)} %</b>`+
     `<span>${t('r_combo')}</span><b>${maxCombo}</b><span style="color:#ffd93d">Perfect</span><b>${counts.perfect}</b>`+
@@ -892,7 +1029,7 @@ function rankFx(g){
 function registerJudge(j,note,isEnd){
   counts[j]++;
   const J=JUDGE[j];
-  if((j==='miss'||j==='wrong')&&settings.diff==='impossible'&&state==='playing'&&!isEnd) die();
+  if((j==='miss'||j==='wrong')&&settings.diff==='nightmare'&&state==='playing'&&!isEnd) die();
   if(!isEnd) applyLife(j);
   if(j==='miss'||j==='wrong') combo=0; else {combo++; if(combo>maxCombo) maxCombo=combo;}
   score+=Math.round(J.pts*(1+Math.min(combo,100)/100));
@@ -1117,7 +1254,7 @@ function updateMon(now){
 // ---- vie, score max, HUD, hold ----
 function lifeDmg(j){
   if(j==='miss'||j==='wrong') return 15*dmgScale;
-  if(j==='almost') return ({easy:10,normal:9,hard:8,hardcore:7.5,impossible:7}[settings.diff]||8)*dmgScale;
+  if(j==='almost') return ({easy:10,normal:9,hard:8,nightmare:7}[settings.diff]||8)*dmgScale;
   return 0;
 }
 function applyLife(j){
@@ -1265,7 +1402,7 @@ function shape(type,x,y,r,color,fillA,lw){
   g.stroke();
 }
 // ---- personnage (image fournie par l'utilisateur, jamais hébergée) + dialogues ----
-const CHAR_NAME='Miku';
+const charName=()=>(settings.charName||'Miku');
 let user=null, spk=null;
 const CHS={idle:{el:$('charImg'),ok:false,key:'rh_char_idle'},talk:{el:$('charImgTalk'),ok:false,key:'rh_char'}};
 try{ user=localStorage.getItem('rh_user'); }catch(e){}
@@ -1346,7 +1483,7 @@ function charTick(now){
       const n=Math.min(spk.text.length,Math.floor((now-spk.start)/SPEAK_MS));
       bub.style.display='block';
       bub.innerHTML='<span class="nm"></span><span class="tx"></span>';
-      bub.querySelector('.nm').textContent=CHAR_NAME;
+      bub.querySelector('.nm').textContent=charName();
       bub.querySelector('.tx').textContent=Array.from(spk.text).slice(0,n).join('');
     } else bub.style.display='none';
     if(charReady()){
